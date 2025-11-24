@@ -9,6 +9,7 @@ from gtts import gTTS
 from io import BytesIO
 import logging
 from datetime import datetime
+import tiktoken
 
 # Configure logging
 logging.basicConfig(
@@ -40,8 +41,50 @@ else:
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+# Token configuration
+MAX_OUTPUT_TOKENS = 150  # Shorter responses
+SAFETY_MARGIN = 10  # Buffer for response truncation
+
+# Initialize tokenizer for counting
+try:
+    encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+except Exception:
+    encoding = tiktoken.get_encoding("cl100k_base")
+
+def count_tokens(text: str) -> int:
+    """Count tokens in text using tiktoken"""
+    try:
+        tokens = encoding.encode(text)
+        return len(tokens)
+    except Exception as e:
+        logger.warning(f"Token counting error: {e}, using char estimate")
+        return len(text) // 4  # Rough estimate: ~4 chars per token
+
+def truncate_to_max_tokens(text: str, max_tokens: int) -> tuple[str, int]:
+    """Truncate text to max tokens and return truncated text with token count"""
+    tokens = encoding.encode(text)
+    
+    if len(tokens) <= max_tokens:
+        return text, len(tokens)
+    
+    # Truncate to max tokens
+    truncated_tokens = tokens[:max_tokens]
+    truncated_text = encoding.decode(truncated_tokens)
+    
+    # Add ellipsis if truncated
+    if truncated_text:
+        truncated_text = truncated_text.rstrip() + "..."
+    
+    return truncated_text, max_tokens
+
 class TextMessage(BaseModel):
     message: str
+
+class ChatResponse(BaseModel):
+    response: str
+    tokens_used: int
+    max_tokens: int
+    truncated: bool
 
 @app.on_event("startup")
 async def startup_event():
@@ -59,7 +102,7 @@ def read_root():
 
 @app.post("/chat/text")
 async def chat_text(data: TextMessage):
-    """Handle text-based chat"""
+    """Handle text-based chat with token limiting"""
     logger.info(f"Received text message: {data.message[:50]}...")
     
     try:
@@ -69,9 +112,19 @@ async def chat_text(data: TextMessage):
         )
         
         ai_response = response.text
-        logger.info(f"AI response generated: {ai_response[:50]}...")
         
-        return {"response": ai_response}
+        # Truncate response to max tokens
+        truncated_response, tokens_used = truncate_to_max_tokens(ai_response, MAX_OUTPUT_TOKENS)
+        was_truncated = len(response.text) != len(truncated_response)
+        
+        logger.info(f"AI response generated with {tokens_used} tokens (truncated: {was_truncated})")
+        
+        return {
+            "response": truncated_response,
+            "tokens_used": tokens_used,
+            "max_tokens": MAX_OUTPUT_TOKENS,
+            "truncated": was_truncated
+        }
     except Exception as e:
         logger.error(f"Error in chat_text: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

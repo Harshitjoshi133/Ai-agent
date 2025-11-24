@@ -9,6 +9,9 @@ interface Message {
   type: 'user' | 'ai';
   text: string;
   audio?: string;
+  tokensUsed?: number;
+  maxTokens?: number;
+  truncated?: boolean;
 }
 
 export default function Home() {
@@ -48,11 +51,17 @@ export default function Home() {
       });
 
       const aiText = response.data.response;
+      const tokensUsed = response.data.tokens_used;
+      const maxTokens = response.data.max_tokens;
+      const truncated = response.data.truncated;
       
-      // Add message without audio first
+      // Add message with token info
       setMessages(prev => [...prev, { 
         type: 'ai', 
-        text: aiText
+        text: aiText,
+        tokensUsed,
+        maxTokens,
+        truncated
       }]);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to send message');
@@ -274,12 +283,18 @@ export default function Home() {
       });
 
       const aiText = response.data.response;
+      const tokensUsed = response.data.tokens_used;
+      const maxTokens = response.data.max_tokens;
+      const truncated = response.data.truncated;
       const messageIndex = messages.length + 1;
       
-      // Add message without audio
+      // Add message with token info
       setMessages(prev => [...prev, { 
         type: 'ai', 
-        text: aiText
+        text: aiText,
+        tokensUsed,
+        maxTokens,
+        truncated
       }]);
       
       // Auto-play audio for voice messages
@@ -332,14 +347,22 @@ export default function Home() {
             <div className="message-bubble">
               {msg.text}
               {msg.type === 'ai' && (
-                <button
-                  className="btn-play-audio"
-                  onClick={() => playAudio(msg.text, idx)}
-                  disabled={playingAudio === idx}
-                  title="Play audio"
-                >
-                  {playingAudio === idx ? '🔊' : '🔉'}
-                </button>
+                <>
+                  <button
+                    className="btn-play-audio"
+                    onClick={() => playAudio(msg.text, idx)}
+                    disabled={playingAudio === idx}
+                    title="Play audio"
+                  >
+                    {playingAudio === idx ? '🔊' : '🔉'}
+                  </button>
+                  {msg.tokensUsed !== undefined && (
+                    <div className="token-info">
+                      <span>📊 {msg.tokensUsed}/{msg.maxTokens} tokens</span>
+                      {msg.truncated && <span className="truncated-badge">truncated</span>}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
